@@ -3,15 +3,16 @@
  *
  * 安装后无需手写 YAML：在「添加仪表盘 → 社区仪表盘」里选择本策略，
  * 会自动发现家中所有雅迪车辆（雅迪集成 v2.0.0+）并生成三套视图：
- *   1. 总览     —— 电量、续航、今日/本周/本月/累计里程
+ *   1. 总览     —— 车辆实拍图、电量长条图、续航、今日/本周/本月/累计里程
  *   2. 骑行轨迹 —— 今日骑行大数字、近 14 天柱状图、最近路线、今日分段明细
  *   3. 能耗档案 —— 充电/耗电统计、车辆档案
  *
- * 依赖前端卡片：card-mod、mushroom、apexcharts-card
+ * 依赖前端卡片：card-mod、mushroom、apexcharts-card；
+ * 可选安装 bar-card，总览页将呈现旗舰版同款电量长条图（未装则自动降级）。
  * 生成后可在仪表盘右上角「接管控制」转为可手动编辑的普通仪表盘。
  */
 
-const VERSION = "1.0.1";
+const VERSION = "1.0.2";
 const ACCENTS = ["#f97316", "#38bdf8", "#a78bfa", "#34d399", "#f472b6", "#facc15"];
 
 const BG =
@@ -176,25 +177,81 @@ function discoverVehicles(hass, config) {
 
 /* ---------------------------------------------------------------- 卡片构造 */
 
-function heroCard(v) {
+function heroCard(hass, v) {
   const battery = eid(v, "battery");
   const range = eid(v, "remaining_range");
   const report = eid(v, "last_report");
   const month = eid(v, "mileage_this_month");
-  const model = v.model || "";
+  const count = eid(v, "battery_count");
 
-  const lines = [];
-  lines.push(model ? `**${model}**\n` : "");
-  lines.push(
-    `# {{ states('${battery}') | int(0) }}%\n`,
-    `续航 {{ states('${range}') }} km · 本月 {{ states('${month}') }} km\n`,
-    `上报 {{ states('${report}') | as_timestamp | timestamp_custom('%m-%d %H:%M', true) }}`
-  );
+  // 车辆实拍图：来自 sensor.<prefix>_vehicle_info 的 vehicle_image 属性（雅迪集成提供）
+  const info = hass.states[eid(v, "vehicle_info")];
+  const img =
+    info && info.attributes && info.attributes.vehicle_image
+      ? String(info.attributes.vehicle_image)
+      : "";
 
-  return mdCard(
-    lines.join(""),
-    `h1 { color: ${v.accent} !important; font-size: 44px !important; margin: 4px 0 6px !important; }`
-  );
+  // 与旗舰版一致的「值或 —」模板
+  const val = (id) =>
+    `{{ (states('${id}') if states('${id}') not in ('unknown', 'unavailable', 'None') else '—') }}`;
+  const rel = (id) =>
+    `{% set ts = as_timestamp(states('${id}')) %}{% if ts > 0 %}` +
+    `{% set d = (as_timestamp(now()) - ts) | int %}` +
+    `{% if d < 3600 %}{{ (d // 60) }} 分钟前` +
+    `{% elif d < 86400 %}{{ (d // 3600) }} 小时前` +
+    `{% else %}{{ (d // 86400) }} 天前{% endif %}{% else %}—{% endif %}`;
+
+  const meta = [
+    hasEntity(hass, count) ? `电池 ${val(count)} 组` : null,
+    hasEntity(hass, month) ? `本月 ${val(month)} km` : null,
+    hasEntity(hass, report) ? `上报 ${rel(report)}` : null,
+  ]
+    .filter(Boolean)
+    .join(" · ");
+
+  const content = [
+    `**YADEA · SMART MOTO**  \n`,
+    v.model ? `**${v.model}**\n` : "",
+    `\n# ${val(battery)}%\n`,
+    `\n**续航 ${val(range)} km**\n`,
+    meta ? `\n${meta}\n` : "",
+  ].join("");
+
+  const bgLayers = [
+    "linear-gradient(0deg, rgba(8,13,24,0.85) 0%, rgba(8,13,24,0) 30%)",
+    "linear-gradient(90deg, rgba(8,13,24,0.99) 0%, rgba(8,13,24,0.95) 28%, rgba(8,13,24,0.30) 50%, rgba(8,13,24,0) 68%)",
+    img ? `url("${img}") right 2px center / contain no-repeat` : null,
+    "linear-gradient(160deg, #16233c 0%, #0a1020 100%)",
+  ]
+    .filter(Boolean)
+    .join(", ");
+
+  const styleDot = [
+    "ha-card {",
+    "  --primary-text-color: #f1f5f9;",
+    "  --secondary-text-color: #94a3b8;",
+    "  min-height: 168px;",
+    "  border-radius: 24px;",
+    "  overflow: hidden;",
+    "  border: 1px solid rgba(120,160,255,0.14);",
+    "  box-shadow: 0 16px 36px rgba(2,6,23,0.50);",
+    `  background: ${bgLayers};`,
+    "}",
+    "ha-markdown { padding: 14px 16px; }",
+    "ha-markdown h1 { margin: 2px 0 4px; letter-spacing: .5px; }",
+  ].join("\n");
+
+  const styleMd = [
+    "h1 { font-size: 44px !important; font-weight: 700 !important; line-height: 1.1 !important; margin: 2px 0 6px !important; }",
+    "p { margin: 0.35em 0 !important; }",
+    "p strong:first-child { letter-spacing: 1.2px; font-size: 92%; }",
+  ].join("\n");
+
+  return {
+    type: "markdown",
+    content,
+    card_mod: { style: { ".": styleDot, "ha-markdown $": styleMd } },
+  };
 }
 
 function statGrid(hass, v) {
@@ -253,8 +310,71 @@ function statGrid(hass, v) {
   return { type: "grid", columns: 2, square: false, cards: items };
 }
 
-function batteryBar(hass, v) {
+/* bar-card 检测：装了就用旗舰版同款电量长条图，没装则降级为普通卡片 */
+function hasBarCardSync() {
+  try {
+    if (customElements.get("bar-card")) return true;
+  } catch (err) {
+    /* ignore */
+  }
+  try {
+    return (window.customCards || []).some((c) => c.type === "bar-card");
+  } catch (err) {
+    return false;
+  }
+}
+
+async function detectBarCard(timeoutMs = 1500) {
+  if (hasBarCardSync()) return true;
+  try {
+    await Promise.race([
+      customElements.whenDefined("bar-card"),
+      new Promise((resolve) => setTimeout(resolve, timeoutMs)),
+    ]);
+  } catch (err) {
+    /* ignore */
+  }
+  return hasBarCardSync();
+}
+
+const BAR_CARD_CSS = [
+  "ha-card {",
+  "  background: linear-gradient(158deg, rgba(18,27,45,0.94) 0%, rgba(9,14,26,0.96) 100%) !important;",
+  "  border: 1px solid rgba(120,160,255,0.12);",
+  "  border-radius: 18px;",
+  "  box-shadow: 0 12px 30px rgba(2,6,23,0.40);",
+  "  padding: 10px 14px 6px;",
+  "  --primary-text-color: #94a3b8;",
+  "}",
+  "bar-card-currentbar, bar-card-backgroundbar { border-radius: 7px; }",
+  "bar-card-name { font-size: 12px; }",
+  "bar-card-value { font-size: 12px; color: #e2e8f0; }",
+  "bar-card-iconbar ha-icon { color: #7dd3fc; }",
+].join("\n");
+
+function batteryBarCard(v) {
+  return {
+    type: "custom:bar-card",
+    entities: [{ entity: eid(v, "battery"), name: `${v.name} 电量`, icon: "mdi:battery-high" }],
+    unit_of_measurement: "%",
+    min: 0,
+    max: 100,
+    height: 14,
+    radius: 7,
+    gravity: false,
+    positions: { icon: "off", indicator: "off", name: "off", value: "inside" },
+    severity: [
+      { color: "#ef4444", from: 0, to: 20 },
+      { color: "#f59e0b", from: 20, to: 50 },
+      { color: "#22c55e", from: 50, to: 100 },
+    ],
+    card_mod: { style: BAR_CARD_CSS },
+  };
+}
+
+function batteryBar(hass, v, hasBar) {
   if (!hasEntity(hass, eid(v, "battery"))) return null;
+  if (hasBar) return batteryBarCard(v);
   return {
     type: "custom:mushroom-template-card",
     grid_columns: 2,
@@ -422,7 +542,7 @@ function profileTable(hass, v) {
 
 /* ------------------------------------------------------------------ 视图 */
 
-function overviewView(vehicles, hass) {
+function overviewView(vehicles, hass, hasBar) {
   return {
     title: "总览",
     path: "overview",
@@ -434,8 +554,8 @@ function overviewView(vehicles, hass) {
       type: "grid",
       cards: [
         headingCard(v.name, "mdi:motorbike", v.accent),
-        heroCard(v),
-        batteryBar(hass, v),
+        heroCard(hass, v),
+        batteryBar(hass, v, hasBar),
         statGrid(hass, v),
         hasEntity(hass, eid(v, "last_ride"))
           ? rideCard(hass, v)
@@ -521,7 +641,8 @@ class YadeaDashboardStrategy extends HTMLElement {
       };
     }
 
-    const views = [overviewView(vehicles, hass)];
+    const hasBar = await detectBarCard();
+    const views = [overviewView(vehicles, hass, hasBar)];
     const hasTrack = vehicles.some((v) =>
       hasEntity(hass, eid(v, "today_mileage"))
     );
@@ -551,7 +672,7 @@ try {
       strategyType: "dashboard",
       name: "雅迪电动车",
       description:
-        "自动发现雅迪车辆，生成总览 / 骑行轨迹 / 能耗档案三套深色视图。依赖 card-mod、mushroom、apexcharts-card。",
+        "自动发现雅迪车辆，生成总览 / 骑行轨迹 / 能耗档案三套深色视图。依赖 card-mod、mushroom、apexcharts-card；可选 bar-card 提供电量长条图。",
       documentationURL: "https://github.com/flyqgs/yadea-dashboard",
     });
   }

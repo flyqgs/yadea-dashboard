@@ -9,7 +9,7 @@
 
 | 视图 | 内容 |
 |---|---|
-| 总览 | 电量大数字、续航、今日/本周/本月/累计里程、累计减碳、最近一次骑行 |
+| 总览 | 车辆实拍图头卡、电量长条图、电量大数字、续航、今日/本周/本月/累计里程、累计减碳、最近一次骑行 |
 | 骑行轨迹 | 今日里程大数字、近 14 天柱状图、最近路线起终点、今日分段明细表 |
 | 能耗档案 | 昨日/7 天充电与耗电、车辆档案（型号/电池/物联网卡） |
 
@@ -39,6 +39,7 @@ strategy:
 | [card-mod](https://github.com/thomasloven/lovelace-card-mod) | 深色卡片样式 |
 | [mushroom](https://github.com/piitaya/lovelace-mushroom) | 统计卡片 |
 | [apexcharts-card](https://github.com/RomRider/apexcharts-card) | 近 14 天柱状图 |
+| [bar-card](https://github.com/custom-cards/bar-card)（可选） | 总览页电量长条图；未安装时自动降级为普通电量卡片 |
 
 以上均可在 HACS / Marketplace 安装。
 
@@ -60,10 +61,10 @@ strategy:
 1. **强制刷新页面**（Ctrl+F5；手机 App 在设置里清除前端缓存或杀掉重开）
 2. 若装在 `config/www/community/yadea-dashboard/`，确认资源 URL 带版本号：
    「设置 → 仪表盘 → 资源」中把该资源的 URL 改为
-   `/local/community/yadea-dashboard/yadea-dashboard.js?v=1.0.1`（版本号随更新递增）
+   `/local/community/yadea-dashboard/yadea-dashboard.js?v=1.0.2`（版本号随更新递增）
 3. 仍不行时重启 HA，再刷新浏览器
 
-模块加载成功后，浏览器控制台会输出 `YADEA-DASHBOARD v1.0.1`，可据此确认版本。
+模块加载成功后，浏览器控制台会输出 `YADEA-DASHBOARD v1.0.2`，可据此确认版本。
 
 ## 里程/轨迹数据说明
 
