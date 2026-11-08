@@ -3,7 +3,8 @@
  *
  * 安装后无需手写 YAML：在「添加仪表盘 → 社区仪表盘」里选择本策略，
  * 会自动发现家中所有雅迪车辆（雅迪集成 v2.0.0+）并生成三套视图：
- *   1. 总览     —— 车辆实拍图、电量长条图、续航、今日/本周/本月/累计里程
+ *   1. 总览     —— 车辆实拍图头卡、电量长条图、本月/累计/减碳/近 7 天统计、
+ *                  近 7 天柱状图、双车对比、能耗·云端计费、物联网卡、车辆档案对照、数据说明
  *   2. 骑行轨迹 —— 今日骑行大数字、近 14 天柱状图、最近路线、今日分段明细
  *   3. 能耗档案 —— 充电/耗电统计、车辆档案
  *
@@ -12,11 +13,11 @@
  * 生成后可在仪表盘右上角「接管控制」转为可手动编辑的普通仪表盘。
  */
 
-const VERSION = "1.0.2";
-const ACCENTS = ["#f97316", "#38bdf8", "#a78bfa", "#34d399", "#f472b6", "#facc15"];
+const VERSION = "1.0.4";
+const ACCENTS = ["#38bdf8", "#60a5fa", "#a78bfa", "#34d399", "#f472b6", "#facc15"];
 
 const BG =
-  "radial-gradient(1400px 800px at 12% -8%, #14243d 0%, #0b1220 58%, #070b14 100%)";
+  "radial-gradient(1400px 800px at 12% -8%, #1b2b49 0%, #0b1220 58%, #070b14 100%)";
 
 const CARD_CSS = [
   "ha-card {",
@@ -44,6 +45,30 @@ const MD_CSS = [
   "td { padding: 5px 6px; border-bottom: 1px solid rgba(148,163,184,0.10); }",
 ].join("\n");
 
+/* 旗舰版同款渐变卡样式（总览页对齐旗舰版用） */
+const PRO_CARD_CSS = [
+  "ha-card {",
+  "  --primary-text-color: #f1f5f9;",
+  "  --secondary-text-color: #94a3b8;",
+  "  --card-primary-color: #f1f5f9;",
+  "  --card-secondary-color: #94a3b8;",
+  "  --rgb-primary-text-color: 241,245,249;",
+  "  --rgb-secondary-text-color: 148,163,184;",
+  "  --markdown-table-border-color: rgba(148,163,184,0.22);",
+  "  --divider-color: rgba(148,163,184,0.16);",
+  "  --state-icon-color: #7dd3fc;",
+  "  background: linear-gradient(158deg, rgba(18,27,45,0.94) 0%, rgba(9,14,26,0.96) 100%) !important;",
+  "  border: 1px solid rgba(120,160,255,0.12);",
+  "  border-radius: 20px;",
+  "  box-shadow: 0 12px 30px rgba(2,6,23,0.40);",
+  "  overflow: hidden;",
+  "}",
+].join("\n");
+
+const PRO_MD_CSS = [PRO_CARD_CSS, "ha-markdown { padding: 12px 16px; font-size: 90%; }"].join(
+  "\n"
+);
+
 /* ---------------------------------------------------------------- 工具函数 */
 
 const eid = (v, suffix) => `${v.prefix}_${suffix}`;
@@ -54,6 +79,10 @@ const num = (hass, id) => {
   const n = Number(s.state);
   return Number.isFinite(n) ? n : null;
 };
+/** 「有值显示值，否则显示 —」的 Jinja 片段 */
+const valTpl = (id) =>
+  `{{ (states('${id}') if states('${id}') not in ('unknown', 'unavailable', 'None') else '—') }}`;
+const attrTpl = (id, attr) => `{{ (state_attr('${id}', '${attr}') or '—') }}`;
 
 function headingCard(text, icon, accent) {
   return {
@@ -67,6 +96,7 @@ function headingCard(text, icon, accent) {
         "  --ha-heading-card-title-color: #e2e8f0;",
         "  --ha-heading-card-subtitle-color: #94a3b8;",
         "  --ha-heading-card-title-font-weight: 600;",
+        "  --ha-heading-card-subtitle-font-weight: 600;",
         "  background: transparent !important;",
         "  border: none !important;",
         "  box-shadow: none !important;",
@@ -77,16 +107,16 @@ function headingCard(text, icon, accent) {
   };
 }
 
-function mdCard(content, extraCss = "") {
+function mdCard(content, extraCss = "", style = MD_CSS) {
   return {
     type: "markdown",
     content,
-    card_mod: { style: extraCss ? `${MD_CSS}\n${extraCss}` : MD_CSS },
+    card_mod: { style: extraCss ? `${style}\n${extraCss}` : style },
   };
 }
 
 /** mushroom 模板卡（无 entity，点击不触发更多信息） */
-function tplCard({ icon, color, primary, secondary, multiline = false }) {
+function tplCard({ icon, color, primary, secondary, multiline = false, style = CARD_CSS }) {
   return {
     type: "custom:mushroom-template-card",
     icon,
@@ -95,7 +125,7 @@ function tplCard({ icon, color, primary, secondary, multiline = false }) {
     secondary,
     multiline_secondary: multiline,
     tap_action: { action: "none" },
-    card_mod: { style: CARD_CSS },
+    card_mod: { style },
   };
 }
 
@@ -192,8 +222,7 @@ function heroCard(hass, v) {
       : "";
 
   // 与旗舰版一致的「值或 —」模板
-  const val = (id) =>
-    `{{ (states('${id}') if states('${id}') not in ('unknown', 'unavailable', 'None') else '—') }}`;
+  const val = valTpl;
   const rel = (id) =>
     `{% set ts = as_timestamp(states('${id}')) %}{% if ts > 0 %}` +
     `{% set d = (as_timestamp(now()) - ts) | int %}` +
@@ -254,60 +283,109 @@ function heroCard(hass, v) {
   };
 }
 
+/** 旗舰版同款统计四宫格：本月 / 累计 / 减碳 / 近 7 天 */
 function statGrid(hass, v) {
   const items = [
-    tplIf(hass, [eid(v, "today_mileage")], () =>
+    tplIf(hass, [eid(v, "mileage_this_month")], () =>
       tplCard({
         icon: "mdi:map-marker-distance",
         color: v.accent,
-        primary: `{{ states('${eid(v, "today_mileage")}') }} km`,
-        secondary: "今日里程",
-      })
-    ),
-    tplIf(hass, [eid(v, "this_week_mileage")], () =>
-      tplCard({
-        icon: "mdi:calendar-week",
-        color: v.accent,
-        primary: `{{ states('${eid(v, "this_week_mileage")}') }} km`,
-        secondary: "本周里程",
-      })
-    ),
-    tplIf(hass, [eid(v, "mileage_this_month")], () =>
-      tplCard({
-        icon: "mdi:calendar-month",
-        color: v.accent,
-        primary: `{{ states('${eid(v, "mileage_this_month")}') }} km`,
+        primary: `${valTpl(eid(v, "mileage_this_month"))} km`,
         secondary: "本月里程",
+        style: PRO_CARD_CSS,
       })
     ),
     tplIf(hass, [eid(v, "total_mileage")], () =>
       tplCard({
-        icon: "mdi:counter",
-        color: v.accent,
-        primary: `{{ states('${eid(v, "total_mileage")}') }} km`,
+        icon: "mdi:road-variant",
+        color: "#60a5fa",
+        primary: `${valTpl(eid(v, "total_mileage"))} km`,
         secondary: "累计里程",
+        style: PRO_CARD_CSS,
       })
     ),
-    tplIf(hass, [eid(v, "total_co2_saved")], () =>
-      tplCard({
-        icon: "mdi:leaf",
-        color: "#34d399",
-        primary: `{{ states('${eid(v, "total_co2_saved")}') }} kg`,
-        secondary: "累计减碳",
-      })
-    ),
-    tplIf(hass, [eid(v, "today_rides"), eid(v, "today_ride_time")], () =>
+    // 减碳：优先用 total_co2_saved 实体，缺实体时按旗舰版口径 0.18 kg/km 折算
+    hasEntity(hass, eid(v, "total_co2_saved"))
+      ? tplCard({
+          icon: "mdi:leaf",
+          color: "#22c55e",
+          primary: `${valTpl(eid(v, "total_co2_saved"))} kg`,
+          secondary: "累计碳减排",
+          style: PRO_CARD_CSS,
+        })
+      : tplIf(hass, [eid(v, "total_mileage")], () =>
+          tplCard({
+            icon: "mdi:leaf",
+            color: "#22c55e",
+            primary:
+              `{% set km = states('${eid(v, "total_mileage")}') %}` +
+              `{% if km in ('unknown','unavailable','None') %}—` +
+              `{% else %}{{ (km | float(0) * 0.18) | round(1) }}{% endif %} kg`,
+            secondary: "累计碳减排 · 0.18 kg/km",
+            style: PRO_CARD_CSS,
+          })
+        ),
+    tplIf(hass, [eid(v, "this_week_mileage")], () =>
       tplCard({
         icon: "mdi:bike-fast",
-        color: v.accent,
-        primary: `{{ states('${eid(v, "today_rides")}') }} 次`,
-        secondary: `今日骑行 · {{ states('${eid(v, "today_ride_time")}') }} 分钟`,
+        color: "#f59e0b",
+        primary: `${valTpl(eid(v, "this_week_mileage"))} km`,
+        secondary: "近 7 天骑行",
+        style: PRO_CARD_CSS,
       })
     ),
   ].filter(Boolean);
 
   if (!items.length) return null;
   return { type: "grid", columns: 2, square: false, cards: items };
+}
+
+/** 旗舰版同款近 7 天柱状图（读 this_week_mileage 的 days 属性） */
+function weeklyChart(hass, v) {
+  const id = eid(v, "this_week_mileage");
+  if (!hasEntity(hass, id)) return null;
+  return {
+    type: "custom:apexcharts-card",
+    header: { show: false },
+    graph_span: "7d",
+    span: { end: "day" },
+    update_interval: "30min",
+    show: { loading: false },
+    series: [
+      {
+        entity: id,
+        type: "column",
+        name: "每日里程",
+        color: v.accent,
+        data_generator: [
+          "const rows = (entity && entity.attributes && entity.attributes.days) || [];",
+          "return rows.map((r) => [new Date(r.date + 'T00:00:00+08:00').getTime(), Number(r.km) || 0]);",
+        ].join("\n"),
+      },
+    ],
+    apex_config: {
+      chart: { height: 150, foreColor: "#94a3b8", toolbar: { show: false } },
+      dataLabels: { enabled: false },
+      xaxis: {
+        labels: { format: "MM-dd", style: { fontSize: "10px" } },
+        axisBorder: { show: false },
+        axisTicks: { show: false },
+      },
+      yaxis: { labels: { style: { fontSize: "10px" } } },
+      grid: {
+        borderColor: "rgba(148,163,184,0.14)",
+        yaxis: { lines: { show: true } },
+      },
+      plotOptions: { bar: { borderRadius: 4, columnWidth: "55%" } },
+      tooltip: { theme: "dark" },
+      noData: {
+        text: "暂无骑行数据 · 骑行后自动累计",
+        align: "center",
+        style: { color: "#94a3b8", fontSize: "13px" },
+      },
+    },
+    card_mod: { style: `${PRO_CARD_CSS}\nha-card { padding: 8px 10px 0; }` },
+  };
 }
 
 /* bar-card 检测：装了就用旗舰版同款电量长条图，没装则降级为普通卡片 */
@@ -540,9 +618,173 @@ function profileTable(hass, v) {
   return mdCard(`### ${v.name} 档案\n\n| 项目 | 数值 |\n| --- | --- |\n${body}`);
 }
 
+/* ------------------------------------------------ 旗舰版共享区块（总览页） */
+
+/** 双车对比：两台车时生成（电量 / 本月里程 / 累计里程） */
+function compareUnit(hass, a, b) {
+  const mk = (icon, color, label, suffix, ea, eb) =>
+    tplCard({
+      icon,
+      color,
+      primary: `${valTpl(ea)}${suffix} · ${valTpl(eb)}${suffix}`,
+      secondary: `${label} · ${a.name} / ${b.name}`,
+      style: PRO_CARD_CSS,
+    });
+  const pair = (sfx) => hasEntity(hass, eid(a, sfx)) && hasEntity(hass, eid(b, sfx));
+  const cards = [
+    pair("battery")
+      ? mk("mdi:battery-80", "#22c55e", "电量", "%", eid(a, "battery"), eid(b, "battery"))
+      : null,
+    pair("mileage_this_month")
+      ? mk(
+          "mdi:map-marker-distance",
+          "#38bdf8",
+          "本月里程",
+          " km",
+          eid(a, "mileage_this_month"),
+          eid(b, "mileage_this_month")
+        )
+      : null,
+    pair("total_mileage")
+      ? mk("mdi:road-variant", "#60a5fa", "累计里程", " km", eid(a, "total_mileage"), eid(b, "total_mileage"))
+      : null,
+  ].filter(Boolean);
+  if (!cards.length) return [];
+  return [headingCard("双车对比", "mdi:compare-horizontal", "#60a5fa"), ...cards];
+}
+
+/** 车辆档案对照表：所有车辆的 vehicle_info 属性并排 */
+function profileUnit(vehicles, hass) {
+  const rows = vehicles.filter((v) => hasEntity(hass, eid(v, "vehicle_info")));
+  if (!rows.length) return [];
+  const attrs = [
+    ["型号", "model_no"],
+    ["颜色", "color"],
+    ["电池数量", "battery_type"],
+    ["蓝牙名", "bluetooth_name"],
+    ["MAC", "mac_address"],
+    ["ICCID", "iccid"],
+    ["绑定日期", "bound_at"],
+    ["物联卡到期", "iot_card_expire"],
+  ];
+  const head = `| 项目 | ${rows
+    .map((v) => v.model || v.name)
+    .join(" | ")} |\n| ${Array(1 + rows.length)
+    .fill("---")
+    .join(" | ")} |\n`;
+  const body = attrs
+    .map(
+      ([label, attr]) =>
+        `| ${label} | ${rows.map((v) => attrTpl(eid(v, "vehicle_info"), attr)).join(" | ")} |\n`
+    )
+    .join("");
+  return [headingCard("车辆档案", "mdi:card-account-details", "#60a5fa"), mdCard(head + body, "", PRO_MD_CSS)];
+}
+
+/** 能耗 · 云端计费：每台车一张汇总卡 */
+function energyUnit(vehicles, hass) {
+  const cards = vehicles
+    .filter((v) =>
+      ["yesterday_charge", "yesterday_consumption", "7_day_charge", "7_day_consumption"].some((s) =>
+        hasEntity(hass, eid(v, s))
+      )
+    )
+    .map((v) =>
+      tplCard({
+        icon: "mdi:lightning-bolt-circle",
+        color: "#f59e0b",
+        primary: `${v.model || v.name} · 能耗`,
+        multiline: true,
+        secondary: [
+          `昨充 ${valTpl(eid(v, "yesterday_charge"))} kWh · 昨用 ${valTpl(eid(v, "yesterday_consumption"))} kWh · `,
+          `7天充 ${valTpl(eid(v, "7_day_charge"))} kWh · 7天用 ${valTpl(eid(v, "7_day_consumption"))} kWh`,
+        ].join(""),
+        style: PRO_CARD_CSS,
+      })
+    );
+  if (!cards.length) return [];
+  return [headingCard("能耗 · 云端计费", "mdi:flash", "#f59e0b"), ...cards];
+}
+
+/** 物联网卡：每台车剩余天数 */
+function iotUnit(vehicles, hass) {
+  const cards = vehicles
+    .filter((v) => hasEntity(hass, eid(v, "iot_days_remaining")))
+    .map((v) =>
+      tplCard({
+        icon: "mdi:sim-outline",
+        color: "#22d3ee",
+        primary: `${valTpl(eid(v, "iot_days_remaining"))} 天`,
+        secondary: `${v.name} · 物联卡剩余`,
+        style: PRO_CARD_CSS,
+      })
+    );
+  if (!cards.length) return [];
+  return [
+    headingCard("物联卡", "mdi:sim", "#22d3ee"),
+    { type: "grid", columns: 2, square: false, cards },
+  ];
+}
+
+/** 数据说明 */
+function noteUnit() {
+  return [
+    headingCard("数据说明", "mdi:information-outline", "#94a3b8"),
+    mdCard(
+      [
+        "## 数据说明\n\n",
+        "- 车辆状态为雅迪云端快照，默认 **60 秒** 轮询；轨迹与里程每 **5 分钟** 同步一次，仅读取不写入车辆。\n",
+        "- 里程、骑行次数、时长、极速与累计里程均来自雅迪云端骑行记录（与 App「骑行统计 / 轨迹历史」同源）。\n",
+        "- 轨迹/里程按账号归属：只有**车主账号**可见，家人共享账号查不到记录。\n",
+        "- 云端偶有脏数据（如单段耗电为负、GPS 抖动切出 0.1 km 碎片段），展示时不做修正。\n",
+      ].join(""),
+      "",
+      PRO_MD_CSS
+    ),
+  ];
+}
+
 /* ------------------------------------------------------------------ 视图 */
 
 function overviewView(vehicles, hass, hasBar) {
+  // 每车一列：头图 → 电量条 → 统计四宫格 → 近 7 天柱状图
+  const sections = vehicles.map((v) => ({
+    type: "grid",
+    cards: [
+      heroCard(hass, v),
+      batteryBar(hass, v, hasBar),
+      statGrid(hass, v),
+      hasEntity(hass, eid(v, "this_week_mileage"))
+        ? headingCard(`近 7 天骑行 · ${v.name}`, "mdi:chart-line", v.accent)
+        : null,
+      weeklyChart(hass, v),
+    ].filter(Boolean),
+  }));
+
+  // 旗舰版共享区块（双车对比 / 车辆档案 / 能耗 / 物联卡 / 数据说明）
+  const units = [
+    ...(vehicles.length === 2 ? compareUnit(hass, vehicles[0], vehicles[1]) : []),
+    ...profileUnit(vehicles, hass),
+    ...energyUnit(vehicles, hass),
+    ...iotUnit(vehicles, hass),
+    ...noteUnit(),
+  ];
+
+  if (vehicles.length === 2) {
+    // 与旗舰版一致：左列追加 对比+档案，右列追加 能耗+物联卡+数据说明
+    const left =
+      (units[0] && units[0].type === "heading" && units[0].heading === "双车对比"
+        ? units.findIndex((c, i) => i > 0 && c.type === "heading")
+        : 0) || 0;
+    const profileIdx = units.findIndex((c) => c.type === "heading" && c.heading === "车辆档案");
+    const leftCount = profileIdx >= 0 ? profileIdx + 2 : left; // 档案标题 + 对照表
+    sections[0].cards.push(...units.slice(0, leftCount));
+    sections[1].cards.push(...units.slice(leftCount));
+  } else {
+    // 单车全放一列；多车时轮转分配，保持两列高度均衡
+    units.forEach((c, i) => sections[i % sections.length].cards.push(c));
+  }
+
   return {
     title: "总览",
     path: "overview",
@@ -550,18 +792,7 @@ function overviewView(vehicles, hass, hasBar) {
     type: "sections",
     max_columns: 2,
     background: BG,
-    sections: vehicles.map((v) => ({
-      type: "grid",
-      cards: [
-        headingCard(v.name, "mdi:motorbike", v.accent),
-        heroCard(hass, v),
-        batteryBar(hass, v, hasBar),
-        statGrid(hass, v),
-        hasEntity(hass, eid(v, "last_ride"))
-          ? rideCard(hass, v)
-          : null,
-      ].filter(Boolean),
-    })),
+    sections,
   };
 }
 
