@@ -11,7 +11,7 @@
  * 生成后可在仪表盘右上角「接管控制」转为可手动编辑的普通仪表盘。
  */
 
-const VERSION = "1.0.0";
+const VERSION = "1.0.1";
 const ACCENTS = ["#f97316", "#38bdf8", "#a78bfa", "#34d399", "#f472b6", "#facc15"];
 
 const BG =
@@ -532,20 +532,31 @@ class YadeaDashboardStrategy extends HTMLElement {
   }
 }
 
-if (!customElements.get("ll-strategy-dashboard-yadea")) {
-  customElements.define("ll-strategy-dashboard-yadea", YadeaDashboardStrategy);
+/* 注册必须同步完成：HA 用 customElements.whenDefined() 等待，
+   任何 await / 动态 import 之前未完成注册都会触发 "Timeout waiting for
+   strategy element ll-strategy-dashboard-yadea to be registered"。 */
+try {
+  if (!customElements.get("ll-strategy-dashboard-yadea")) {
+    customElements.define("ll-strategy-dashboard-yadea", YadeaDashboardStrategy);
+  }
+} catch (err) {
+  console.error("[YADEA-DASHBOARD] 策略元素注册失败", err);
 }
 
-window.customStrategies = window.customStrategies || [];
-if (!window.customStrategies.some((s) => s.type === "yadea")) {
-  window.customStrategies.push({
-    type: "yadea",
-    strategyType: "dashboard",
-    name: "雅迪电动车",
-    description:
-      "自动发现雅迪车辆，生成总览 / 骑行轨迹 / 能耗档案三套深色视图。依赖 card-mod、mushroom、apexcharts-card。",
-    documentationURL: "https://github.com/flyqgs/yadea-dashboard",
-  });
+try {
+  window.customStrategies = window.customStrategies || [];
+  if (!window.customStrategies.some((s) => s.type === "yadea")) {
+    window.customStrategies.push({
+      type: "yadea",
+      strategyType: "dashboard",
+      name: "雅迪电动车",
+      description:
+        "自动发现雅迪车辆，生成总览 / 骑行轨迹 / 能耗档案三套深色视图。依赖 card-mod、mushroom、apexcharts-card。",
+      documentationURL: "https://github.com/flyqgs/yadea-dashboard",
+    });
+  }
+} catch (err) {
+  console.error("[YADEA-DASHBOARD] 策略条目注册失败", err);
 }
 
 console.info(

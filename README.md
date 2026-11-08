@@ -51,6 +51,20 @@ strategy:
 
 > 如果在社区仪表盘列表里看不到，说明浏览器还没加载到本模块：强制刷新一次（Ctrl+F5）。
 
+## 故障排查
+
+**报错 `Timeout waiting for strategy element ll-strategy-dashboard-yadea to be registered`**
+
+这是浏览器没有加载到（或缓存了旧版）策略模块，HA 侧本身正常。按顺序尝试：
+
+1. **强制刷新页面**（Ctrl+F5；手机 App 在设置里清除前端缓存或杀掉重开）
+2. 若装在 `config/www/community/yadea-dashboard/`，确认资源 URL 带版本号：
+   「设置 → 仪表盘 → 资源」中把该资源的 URL 改为
+   `/local/community/yadea-dashboard/yadea-dashboard.js?v=1.0.1`（版本号随更新递增）
+3. 仍不行时重启 HA，再刷新浏览器
+
+模块加载成功后，浏览器控制台会输出 `YADEA-DASHBOARD v1.0.1`，可据此确认版本。
+
 ## 里程/轨迹数据说明
 
 - 里程、骑行次数、时长、极速均来自雅迪云端骑行记录（与 App「骑行统计 / 轨迹历史」同源）
