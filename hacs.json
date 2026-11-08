@@ -1,0 +1,7 @@
+{
+  "name": "Yadea dashboard",
+  "render_readme": true,
+  "filename": "yadea-dashboard.js",
+  "homeassistant": "2026.5.0",
+  "hacs": "2.0.0"
+}

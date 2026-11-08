@@ -1,0 +1,62 @@
+# Yadea dashboard（雅迪电动车仪表盘）
+
+为 [ha-yadea](https://github.com/flyqgs/ha-yadea)（雅迪智行集成）打造的可安装仪表盘。
+安装后**无需手写 YAML**：自动发现家中的雅迪车辆，生成三套统一深色风格的视图。
+
+![总览](https://raw.githubusercontent.com/flyqgs/yadea-dashboard/main/docs/overview.png)
+
+## 功能
+
+| 视图 | 内容 |
+|---|---|
+| 总览 | 电量大数字、续航、今日/本周/本月/累计里程、累计减碳、最近一次骑行 |
+| 骑行轨迹 | 今日里程大数字、近 14 天柱状图、最近路线起终点、今日分段明细表 |
+| 能耗档案 | 昨日/7 天充电与耗电、车辆档案（型号/电池/物联网卡） |
+
+- **自动发现车辆**：按雅迪集成生成的实体自动识别车辆数量与名称，一台或多台都适配
+- **双车对称布局**：每台车独占一列，卡片一一对应；行数可变的分段表放在列尾
+- **可自由定制**：仪表盘右上角「⋮ → 接管控制」即可把生成结果转为可编辑的普通仪表盘
+- **显式指定**（可选）：不想自动发现时，可在策略配置里指定实体前缀：
+
+```yaml
+strategy:
+  type: custom:yadea
+  title: 雅迪电动车
+  # show_data: false        # 不生成「能耗档案」视图
+  # vehicles:
+  #   - prefix: sensor.my_bike
+  #     name: 我的电动车
+  #     accent: "#f97316"
+```
+
+## 安装
+
+### 前置依赖
+
+| 组件 | 用途 |
+|---|---|
+| [ha-yadea](https://github.com/flyqgs/ha-yadea) 集成（v2.0.0+） | 提供里程/轨迹实体 |
+| [card-mod](https://github.com/thomasloven/lovelace-card-mod) | 深色卡片样式 |
+| [mushroom](https://github.com/piitaya/lovelace-mushroom) | 统计卡片 |
+| [apexcharts-card](https://github.com/RomRider/apexcharts-card) | 近 14 天柱状图 |
+
+以上均可在 HACS / Marketplace 安装。
+
+### 本仪表盘
+
+1. 在 **HACS → 前端**（或 HA 2026.11+ 的 Marketplace）搜索 **Yadea dashboard** 安装；
+   也可通过「自定义仓库」添加本仓库地址（类别选 **Lovelace**）
+2. 打开 **编辑仪表盘 → 添加仪表盘**，在 **社区仪表盘** 里选择 **雅迪电动车**
+3. 完成——仪表盘会按你家里的雅迪车辆自动生成
+
+> 如果在社区仪表盘列表里看不到，说明浏览器还没加载到本模块：强制刷新一次（Ctrl+F5）。
+
+## 里程/轨迹数据说明
+
+- 里程、骑行次数、时长、极速均来自雅迪云端骑行记录（与 App「骑行统计 / 轨迹历史」同源）
+- 轨迹/里程按账号归属：只有**车主账号**可见，家人共享账号查不到记录
+- 雅迪为单会话体系：HA 登录会顶掉手机 App，反之亦然（详见 ha-yadea 集成说明）
+
+## 许可
+
+MIT
