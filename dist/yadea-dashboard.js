@@ -13,7 +13,7 @@
  * 生成后可在仪表盘右上角「接管控制」转为可手动编辑的普通仪表盘。
  */
 
-const VERSION = "1.1.1";
+const VERSION = "1.2.4";
 const ACCENTS = ["#fbbf24", "#38bdf8", "#a78bfa", "#34d399", "#f472b6", "#facc15"];
 
 const BG =
@@ -865,6 +865,57 @@ function noteUnit() {
 
 /* ------------------------------------------------------------------ 视图 */
 
+/** 最后位置地图卡：展示最近一次骑行终点（device_tracker） */
+function lastLocationMap(hass, v) {
+  // device_tracker 的 entity_id 由设备名派生，与 sensor 前缀可能不同；
+  // 通过实体注册表按 device_id 匹配该车辆名下的 device_tracker
+  const devId =
+    (hass.entities[`${v.prefix}_battery`] || {}).device_id ||
+    (hass.entities[`${v.prefix}_today_mileage`] || {}).device_id;
+  let id = null;
+  if (devId) {
+    id = Object.keys(hass.entities || {}).find(
+      (e) =>
+        e.startsWith("device_tracker.") &&
+        hass.entities[e].device_id === devId &&
+        hass.states[e]
+    );
+  }
+  if (!id) return null;
+  const attrs = (hass.states[id] || {}).attributes || {};
+  const time = attrs.location_time
+    ? String(attrs.location_time).replace("T", " ").slice(5, 16)
+    : "";
+  const esc = (s) =>
+    String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+  return {
+    type: "vertical-stack",
+    cards: [
+      headingCard("车辆位置 · 最近骑行终点", "mdi:map-marker", v.accent),
+      {
+        type: "map",
+        entities: [{ entity: id, name: v.name }],
+        hours_to_show: 24,
+        dark_mode: true,
+        default_zoom: 15,
+        aspect_ratio: "16:9",
+        card_mod: {
+          style: `ha-card { border: 1px solid rgba(148,163,184,0.18); border-radius: 16px; overflow: hidden; }`,
+        },
+      },
+      attrs.address
+        ? {
+            type: "markdown",
+            content: `<font style="font-size:12px;color:#94a3b8">📍 ${esc(attrs.address)}${time ? ` · ${time} 上报` : ""}</font>`,
+            card_mod: {
+              style: `ha-card { background: transparent; border: none; box-shadow: none; padding: 4px 8px; margin-top: -12px; }`,
+            },
+          }
+        : null,
+    ].filter(Boolean),
+  };
+}
+
 function overviewView(vehicles, hass, hasBar, trends) {
   // 每车一列：头图 → 电量条 → 电量趋势 → 统计四宫格 → 近 7 天柱状图
   const sections = vehicles.map((v) => ({
@@ -878,6 +929,7 @@ function overviewView(vehicles, hass, hasBar, trends) {
         ? headingCard(`近 7 天骑行 · ${v.name}`, "mdi:chart-line", v.accent)
         : null,
       weeklyChart(hass, v),
+      lastLocationMap(hass, v),
     ].filter(Boolean),
   }));
 
