@@ -61,10 +61,10 @@ strategy:
 1. **强制刷新页面**（Ctrl+F5；手机 App 在设置里清除前端缓存或杀掉重开）
 2. 若装在 `config/www/community/yadea-dashboard/`，确认资源 URL 带版本号：
    「设置 → 仪表盘 → 资源」中把该资源的 URL 改为
-   `/local/community/yadea-dashboard/yadea-dashboard.js?v=1.0.5`（版本号随更新递增）
+   `/local/community/yadea-dashboard/yadea-dashboard.js?v=1.0.6`（版本号随更新递增）
 3. 仍不行时重启 HA，再刷新浏览器
 
-模块加载成功后，浏览器控制台会输出 `YADEA-DASHBOARD v1.0.5`，可据此确认版本。
+模块加载成功后，浏览器控制台会输出 `YADEA-DASHBOARD v1.0.6`，可据此确认版本。
 
 ## 里程/轨迹数据说明
 
