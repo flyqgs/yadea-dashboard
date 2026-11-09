@@ -3,7 +3,7 @@
  *
  * 安装后无需手写 YAML：在「添加仪表盘 → 社区仪表盘」里选择本策略，
  * 会自动发现家中所有雅迪车辆（雅迪集成 v2.0.0+）并生成三套视图：
- *   1. 总览     —— 车辆实拍图头卡、电量长条图、本月/累计/减碳/近 7 天统计、
+ *   1. 总览     —— 车辆实拍图头卡、电量长条图、电量趋势(近7天)、本月/累计/减碳/近 7 天统计、
  *                  近 7 天柱状图、双车对比、能耗·云端计费、物联网卡、车辆档案对照、数据说明
  *   2. 骑行轨迹 —— 今日骑行大数字、近 14 天柱状图、最近路线、今日分段明细
  *   3. 能耗档案 —— 充电/耗电统计、车辆档案
@@ -13,7 +13,7 @@
  * 生成后可在仪表盘右上角「接管控制」转为可手动编辑的普通仪表盘。
  */
 
-const VERSION = "1.0.4";
+const VERSION = "1.0.5";
 const ACCENTS = ["#38bdf8", "#60a5fa", "#a78bfa", "#34d399", "#f472b6", "#facc15"];
 
 const BG =
@@ -466,6 +466,92 @@ function batteryBar(hass, v, hasBar) {
   };
 }
 
+/** 电量历史拉取：7 天起点可能早于 recorder 库内最早记录（HA 2026.11 对此直接返回空），
+ *  故逐级回退 7→5→3→2→1 天，取第一批有数据的窗口。 */
+async function fetchBatteryTrendPoints(hass, entityId) {
+  for (const days of [7, 5, 3, 2, 1]) {
+    try {
+      const start = new Date(Date.now() - days * 86400000).toISOString();
+      const res = await hass.callApi(
+        "GET",
+        `history/period/${start}?filter_entity_id=${entityId}&minimal_response&significant_changes_only=0`
+      );
+      const rows = (Array.isArray(res) && res[0]) || [];
+      const points = [];
+      for (const p of rows) {
+        const raw = p.state !== undefined ? p.state : p.s;
+        const value = Number(raw);
+        if (!Number.isFinite(value) || value < 0 || value > 100) continue;
+        const ts = p.last_changed || p.lu;
+        if (!ts) continue;
+        points.push([new Date(ts).getTime(), value]);
+      }
+      if (points.length > 1) return points;
+    } catch (err) {
+      /* 下一个窗口 */
+    }
+  }
+  return [];
+}
+
+/** 电量趋势 · 近7天：面积图 + 阈值变色 + Min/Max 极值标注（历史点由策略生成时内嵌） */
+function batteryTrend(hass, v, points) {
+  const id = eid(v, "battery");
+  if (!hasEntity(hass, id)) return null;
+  const series = [
+    {
+      entity: id,
+      type: "area",
+      name: "电量",
+      color: v.accent,
+      stroke_width: 2,
+      show: { extremas: true },
+      data_generator: `return ${JSON.stringify(points || [])};`,
+    },
+  ];
+  return {
+    type: "custom:apexcharts-card",
+    header: {
+      show: true,
+      title: "电量趋势 · 近7天",
+      show_states: true,
+      colorize_states: true,
+    },
+    graph_span: "7d",
+    update_interval: "10min",
+    show: { loading: false },
+    series,
+    apex_config: {
+      chart: { height: 170, foreColor: "#94a3b8", toolbar: { show: false } },
+      dataLabels: { enabled: false },
+      fill: {
+        type: "gradient",
+        gradient: { shadeIntensity: 0.4, opacityFrom: 0.4, opacityTo: 0.05 },
+      },
+      xaxis: {
+        labels: {
+          datetimeFormatter: { day: "MM-dd", month: "MM-dd" },
+          style: { fontSize: "10px" },
+        },
+        axisBorder: { show: false },
+        axisTicks: { show: false },
+      },
+      yaxis: { min: 0, max: 100, labels: { style: { fontSize: "10px" } } },
+      grid: {
+        borderColor: "rgba(148,163,184,0.14)",
+        yaxis: { lines: { show: true } },
+      },
+      tooltip: { theme: "dark" },
+      noData: {
+        text: "电量历史累计中 · 记录满后自动显示",
+        align: "center",
+        style: { color: "#94a3b8", fontSize: "13px" },
+      },
+    },
+    card_mod: { style: `${PRO_CARD_CSS}\nha-card { padding: 8px 10px 4px; }` },
+  };
+}
+
 function rideCard(hass, v) {
   if (!hasEntity(hass, eid(v, "last_ride"))) return null;
   return {
@@ -746,13 +832,14 @@ function noteUnit() {
 
 /* ------------------------------------------------------------------ 视图 */
 
-function overviewView(vehicles, hass, hasBar) {
-  // 每车一列：头图 → 电量条 → 统计四宫格 → 近 7 天柱状图
+function overviewView(vehicles, hass, hasBar, trends) {
+  // 每车一列：头图 → 电量条 → 电量趋势 → 统计四宫格 → 近 7 天柱状图
   const sections = vehicles.map((v) => ({
     type: "grid",
     cards: [
       heroCard(hass, v),
       batteryBar(hass, v, hasBar),
+      batteryTrend(hass, v, trends && trends[v.prefix]),
       statGrid(hass, v),
       hasEntity(hass, eid(v, "this_week_mileage"))
         ? headingCard(`近 7 天骑行 · ${v.name}`, "mdi:chart-line", v.accent)
@@ -873,7 +960,16 @@ class YadeaDashboardStrategy extends HTMLElement {
     }
 
     const hasBar = await detectBarCard();
-    const views = [overviewView(vehicles, hass, hasBar)];
+    const trends = {};
+    await Promise.all(
+      vehicles.map(async (v) => {
+        const id = eid(v, "battery");
+        if (hasEntity(hass, id)) {
+          trends[v.prefix] = await fetchBatteryTrendPoints(hass, id);
+        }
+      })
+    );
+    const views = [overviewView(vehicles, hass, hasBar, trends)];
     const hasTrack = vehicles.some((v) =>
       hasEntity(hass, eid(v, "today_mileage"))
     );
