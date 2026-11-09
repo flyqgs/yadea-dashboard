@@ -9,7 +9,7 @@
 
 | 视图 | 内容 |
 |---|---|
-| 总览 | 车辆实拍图头卡、电量长条图、电量趋势（近 7 天面积图）、本月/累计/减碳/近 7 天统计、近 7 天柱状图、双车对比、能耗·云端计费、物联网卡剩余、车辆档案对照表、数据说明（与旗舰版布局一致） |
+| 总览 | 车辆实拍图头卡、电量长条图、电量趋势（近 7 天面积图）、本月/累计/减碳/近 7 天统计、近 7 天柱状图、双车对比、能耗·云端计费、物联网卡剩余、车辆档案对照表、**车辆位置地图卡（最近骑行终点）**、数据说明（与旗舰版布局一致） |
 | 骑行轨迹 | 今日里程大数字、近 14 天柱状图、最近路线起终点、今日分段明细表 |
 | 能耗档案 | 昨日/7 天充电与耗电、车辆档案（型号/电池/物联网卡） |
 
@@ -35,7 +35,7 @@ strategy:
 
 | 组件 | 用途 |
 |---|---|
-| [ha-yadea](https://github.com/flyqgs/ha-yadea) 集成（v2.0.0+） | 提供里程/轨迹实体 |
+| [ha-yadea](https://github.com/flyqgs/ha-yadea) 集成（v2.1.0+） | 提供里程/轨迹实体、`device_tracker` 最后位置（地图卡依赖） |
 | [card-mod](https://github.com/thomasloven/lovelace-card-mod) | 深色卡片样式 |
 | [mushroom](https://github.com/piitaya/lovelace-mushroom) | 统计卡片 |
 | [apexcharts-card](https://github.com/RomRider/apexcharts-card) | 近 14 天柱状图 |
@@ -51,6 +51,41 @@ strategy:
 3. 完成——仪表盘会按你家里的雅迪车辆自动生成
 
 > 如果在社区仪表盘列表里看不到，说明浏览器还没加载到本模块：强制刷新一次（Ctrl+F5）。
+
+## 地图卡片与国内底图
+
+总览页会在每台车尾部生成一张**「车辆位置 · 最近骑行终点」**地图卡，数据来自 ha-yadea v2.1.0 的
+`device_tracker.<车辆>_最后位置`（最近一次骑行停车的经纬度 + 地址，非实时定位）。
+
+> **HA 原生地图在国内网络常常一片空白**：默认底图走 OSM / ArcGIS，国内直连不稳定甚至完全不通（连带地图面板、其它地图卡一起失效）。仓库提供 `misc/hass_map_cn.js` 做本机修复。
+
+### 启用方法
+
+1. 下载脚本（HACS 只安装仪表盘本体，不含此文件）：
+   [misc/hass_map_cn.js](https://raw.githubusercontent.com/flyqgs/yadea-dashboard/main/misc/hass_map_cn.js)
+   → 保存到 HA 的 `config/www/hass_map_cn.js`
+2. 在 `configuration.yaml` 的 `frontend:` 下加一行，然后重启 HA：
+
+```yaml
+frontend:
+  themes: !include_dir_merge_named themes
+  extra_module_url:
+    - /local/hass_map_cn.js?v=20261109h    # 版本号随脚本更新递增
+```
+
+3. 刷新浏览器（Ctrl+F5）。控制台出现 `HASS-MAP-CN v2` 即生效
+
+> 该脚本作用于**全局原生地图**（地图面板、其它地图卡同样受益）。更新脚本后**必须更换 `?v=` 版本号**——HA 对 `/local/` 静态文件缓存 31 天，同 URL 不会重新拉取。
+
+### 可选配置（脚本顶部常量）
+
+| 常量 | 说明 |
+|---|---|
+| `AMAP_STYLE` | 默认 `"road"` 高德中文路网图；改为 `"satellite"` 使用卫星图 + 路网叠加 |
+| `TDT_KEY` | 填[天地图](https://lbs.tianditu.gov.cn)浏览器端 Key（免费）可换官方无偏移中文底图，高德方案自动停用 |
+| `FORCE_DARK` | `null` 自动跟随地图卡背景亮度；`true` 强制暗色反色；`false` 保持亮色 |
+
+高德瓦片为 GCJ-02 坐标系，脚本已内置 WGS84→GCJ-02 自动纠偏（仅作用于地图组件），车辆标记与底图精确对齐，不会出现几百米偏移。
 
 ## 故障排查
 
