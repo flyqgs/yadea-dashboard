@@ -13,7 +13,7 @@
  * 生成后可在仪表盘右上角「接管控制」转为可手动编辑的普通仪表盘。
  */
 
-const VERSION = "1.0.9";
+const VERSION = "1.1.1";
 const ACCENTS = ["#fbbf24", "#38bdf8", "#a78bfa", "#34d399", "#f472b6", "#facc15"];
 
 const BG =
@@ -437,7 +437,25 @@ const BAR_CARD_CSS = [
   "bar-card-iconbar ha-icon { color: #7dd3fc; }",
 ].join("\n");
 
-function batteryBarCard(v) {
+function batteryBarCard(hass, v) {
+  // 电量条轨道中央叠加续航里程（generate 时注入当前值）
+  const rangeId = eid(v, "remaining_range");
+  let rangeLabel = "";
+  if (hass && hasEntity(hass, rangeId)) {
+    const n = Number(hass.states[rangeId].state);
+    if (Number.isFinite(n)) rangeLabel = `续航 ${Number.isInteger(n) ? n : n.toFixed(1)} km`;
+  }
+  const centerStyle = rangeLabel
+    ? [
+        "bar-card-background::after {",
+        `  content: "${rangeLabel}";`,
+        "  position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%);",
+        "  font-size: 11px; font-weight: 600; color: #ffffff;",
+        "  text-shadow: 0 1px 3px rgba(2, 6, 23, 0.85);",
+        "  white-space: nowrap; z-index: 2; pointer-events: none;",
+        "}",
+      ].join("\n")
+    : "";
   return {
     type: "custom:bar-card",
     entities: [{ entity: eid(v, "battery"), name: `${v.name} 电量`, icon: "mdi:battery-high" }],
@@ -453,13 +471,13 @@ function batteryBarCard(v) {
       { color: "#f59e0b", from: 20, to: 50 },
       { color: "#22c55e", from: 50, to: 100 },
     ],
-    card_mod: { style: BAR_CARD_CSS },
+    card_mod: { style: `${BAR_CARD_CSS}\n${centerStyle}` },
   };
 }
 
 function batteryBar(hass, v, hasBar) {
   if (!hasEntity(hass, eid(v, "battery"))) return null;
-  if (hasBar) return batteryBarCard(v);
+  if (hasBar) return batteryBarCard(hass, v);
   return {
     type: "custom:mushroom-template-card",
     grid_columns: 2,
