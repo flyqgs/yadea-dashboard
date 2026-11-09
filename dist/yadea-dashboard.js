@@ -13,7 +13,7 @@
  * 生成后可在仪表盘右上角「接管控制」转为可手动编辑的普通仪表盘。
  */
 
-const VERSION = "1.0.7";
+const VERSION = "1.0.8";
 const ACCENTS = ["#fbbf24", "#38bdf8", "#a78bfa", "#34d399", "#f472b6", "#facc15"];
 
 const BG =
@@ -466,32 +466,40 @@ function batteryBar(hass, v, hasBar) {
   };
 }
 
-/** 电量历史拉取：7 天起点可能早于 recorder 库内最早记录（HA 2026.11 对此直接返回空），
- *  故逐级回退 7→5→3→2→1 天，取第一批有数据的窗口。 */
+/** 电量历史拉取：HA 2026.11 + MySQL 下 history API 有两个坑——
+ *  ① 起点早于 recorder 库内最早记录时直接返回空；
+ *  ② 单次查询实际只返回起点后约 24h 的数据（后续被截断）。
+ *  故改为按天切片（显式 end_time）逐段拉取后按时间拼接，
+ *  同时剔除 unavailable / 离线 0% 等无效点。 */
 async function fetchBatteryTrendPoints(hass, entityId) {
-  for (const days of [7, 5, 3, 2, 1]) {
+  const now = Date.now();
+  const points = [];
+  let lastTs = 0;
+  for (let i = 7; i >= 1; i--) {
+    const s = new Date(now - i * 86400000).toISOString();
+    const e = new Date(now - (i - 1) * 86400000).toISOString();
     try {
-      const start = new Date(Date.now() - days * 86400000).toISOString();
       const res = await hass.callApi(
         "GET",
-        `history/period/${start}?filter_entity_id=${entityId}&minimal_response&significant_changes_only=0`
+        `history/period/${encodeURIComponent(s)}?end_time=${encodeURIComponent(e)}&filter_entity_id=${entityId}&minimal_response&significant_changes_only=0`
       );
       const rows = (Array.isArray(res) && res[0]) || [];
-      const points = [];
       for (const p of rows) {
         const raw = p.state !== undefined ? p.state : p.s;
         const value = Number(raw);
-        if (!Number.isFinite(value) || value < 0 || value > 100) continue;
+        if (!Number.isFinite(value) || value <= 0 || value > 100) continue;
         const ts = p.last_changed || p.lu;
         if (!ts) continue;
-        points.push([new Date(ts).getTime(), value]);
+        const t = new Date(ts).getTime();
+        if (!Number.isFinite(t) || t <= lastTs) continue;
+        lastTs = t;
+        points.push([t, value]);
       }
-      if (points.length > 1) return points;
     } catch (err) {
-      /* 下一个窗口 */
+      /* 该天拉取失败则跳过，继续下一天 */
     }
   }
-  return [];
+  return points;
 }
 
 /** 电量趋势 · 近7天：面积图 + 阈值变色 + Min/Max 极值标注（历史点由策略生成时内嵌） */
