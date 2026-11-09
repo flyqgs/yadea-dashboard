@@ -13,7 +13,7 @@
  * 生成后可在仪表盘右上角「接管控制」转为可手动编辑的普通仪表盘。
  */
 
-const VERSION = "1.0.8";
+const VERSION = "1.0.9";
 const ACCENTS = ["#fbbf24", "#38bdf8", "#a78bfa", "#34d399", "#f472b6", "#facc15"];
 
 const BG =
@@ -342,7 +342,10 @@ function statGrid(hass, v) {
 
 /** 旗舰版同款近 7 天柱状图（读 this_week_mileage 的 days 属性） */
 function weeklyChart(hass, v) {
-  const id = eid(v, "this_week_mileage");
+  // 优先用「近7天逐日里程」传感器（days 属性含最近 31 天逐日记录）；
+  // 退而求其次用本周里程（仅当周，周一当天只有 1 条）。
+  const dayId = eid(v, "daily_mileage_7_day");
+  const id = hasEntity(hass, dayId) ? dayId : eid(v, "this_week_mileage");
   if (!hasEntity(hass, id)) return null;
   return {
     type: "custom:apexcharts-card",
@@ -359,7 +362,11 @@ function weeklyChart(hass, v) {
         color: v.accent,
         data_generator: [
           "const rows = (entity && entity.attributes && entity.attributes.days) || [];",
-          "return rows.map((r) => [new Date(r.date + 'T00:00:00+08:00').getTime(), Number(r.km) || 0]);",
+          "const cn = new Date(Date.now() + 8 * 3600 * 1000);",
+          "const cutoff = new Date(cn.getTime() - 6 * 86400000).toISOString().slice(0, 10);",
+          "return rows.filter((r) => r.date >= cutoff)",
+          "  .sort((a, b) => (a.date < b.date ? -1 : 1))",
+          "  .map((r) => [new Date(r.date + 'T00:00:00+08:00').getTime(), Number(r.km) || 0]);",
         ].join("\n"),
       },
     ],
