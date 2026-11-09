@@ -13,8 +13,8 @@
  * 生成后可在仪表盘右上角「接管控制」转为可手动编辑的普通仪表盘。
  */
 
-const VERSION = "1.0.6";
-const ACCENTS = ["#38bdf8", "#fbbf24", "#a78bfa", "#34d399", "#f472b6", "#facc15"];
+const VERSION = "1.0.7";
+const ACCENTS = ["#fbbf24", "#38bdf8", "#a78bfa", "#34d399", "#f472b6", "#facc15"];
 
 const BG =
   "radial-gradient(1400px 800px at 12% -8%, #1b2b49 0%, #0b1220 58%, #070b14 100%)";
