@@ -13,56 +13,237 @@
  * 生成后可在仪表盘右上角「接管控制」转为可手动编辑的普通仪表盘。
  */
 
-const VERSION = "1.2.5";
+const VERSION = "1.2.8";
 const ACCENTS = ["#fbbf24", "#38bdf8", "#a78bfa", "#34d399", "#f472b6", "#facc15"];
 
-const BG =
-  "radial-gradient(1400px 800px at 12% -8%, #1b2b49 0%, #0b1220 58%, #070b14 100%)";
+/* ---------------------------------------------------------------- 主题系统 */
+
+/* 两套配色全部抽成 --ya-* CSS 变量，挂在 :root 上。
+   CSS 自定义属性会穿透 shadow DOM 继承，因此所有卡片样式只需引用 var()，
+   切换主题 = 替换 :root 上的一组变量值，已渲染的卡片即时生效。 */
+const THEME_VARS = {
+  dark: [
+    "--ya-bg:radial-gradient(1400px 800px at 12% -8%, #1b2b49 0%, #0b1220 58%, #070b14 100%)",
+    "--ya-card-bg:rgba(17,24,39,0.72)",
+    "--ya-card-border:rgba(148,163,184,0.16)",
+    "--ya-card-shadow:0 8px 24px rgba(2,6,23,0.45)",
+    "--ya-text:#f1f5f9",
+    "--ya-text2:#94a3b8",
+    "--ya-heading:#e2e8f0",
+    "--ya-text-rgb:241,245,249",
+    "--ya-text2-rgb:148,163,184",
+    "--ya-line:rgba(148,163,184,0.10)",
+    "--ya-line-strong:rgba(148,163,184,0.22)",
+    "--ya-pro-bg:linear-gradient(158deg, rgba(18,27,45,0.94) 0%, rgba(9,14,26,0.96) 100%)",
+    "--ya-pro-border:rgba(120,160,255,0.12)",
+    "--ya-pro-shadow:0 12px 30px rgba(2,6,23,0.40)",
+    "--ya-icon:#7dd3fc",
+    "--ya-chart-text:#94a3b8",
+    "--ya-chart-grid:rgba(148,163,184,0.14)",
+    "--ya-hero-tint1:linear-gradient(0deg, rgba(8,13,24,0.85) 0%, rgba(8,13,24,0) 30%)",
+    "--ya-hero-tint2:linear-gradient(90deg, rgba(8,13,24,0.99) 0%, rgba(8,13,24,0.95) 28%, rgba(8,13,24,0.30) 50%, rgba(8,13,24,0) 68%)",
+    "--ya-hero-base:linear-gradient(160deg, #16233c 0%, #0a1020 100%)",
+    "--ya-hero-border:rgba(120,160,255,0.14)",
+    "--ya-hero-shadow:0 16px 36px rgba(2,6,23,0.50)",
+  ],
+  light: [
+    "--ya-bg:radial-gradient(1400px 800px at 12% -8%, #dbeafe 0%, #f1f5f9 55%, #e7edf3 100%)",
+    "--ya-card-bg:rgba(255,255,255,0.90)",
+    "--ya-card-border:rgba(15,23,42,0.08)",
+    "--ya-card-shadow:0 8px 24px rgba(15,23,42,0.08)",
+    "--ya-text:#0f172a",
+    "--ya-text2:#64748b",
+    "--ya-heading:#1e293b",
+    "--ya-text-rgb:15,23,42",
+    "--ya-text2-rgb:100,116,139",
+    "--ya-line:rgba(15,23,42,0.08)",
+    "--ya-line-strong:rgba(15,23,42,0.15)",
+    "--ya-pro-bg:linear-gradient(158deg, #ffffff 0%, #f6f9fc 100%)",
+    "--ya-pro-border:rgba(59,130,246,0.14)",
+    "--ya-pro-shadow:0 12px 30px rgba(15,23,42,0.08)",
+    "--ya-icon:#0284c7",
+    "--ya-chart-text:#64748b",
+    "--ya-chart-grid:rgba(100,116,139,0.18)",
+    "--ya-hero-tint1:linear-gradient(0deg, rgba(255,255,255,0.86) 0%, rgba(255,255,255,0) 30%)",
+    "--ya-hero-tint2:linear-gradient(90deg, rgba(255,255,255,0.99) 0%, rgba(255,255,255,0.92) 28%, rgba(255,255,255,0.30) 50%, rgba(255,255,255,0) 68%)",
+    "--ya-hero-base:linear-gradient(160deg, #eaf1f8 0%, #dde7f2 100%)",
+    "--ya-hero-border:rgba(59,130,246,0.16)",
+    "--ya-hero-shadow:0 16px 36px rgba(15,23,42,0.10)",
+  ],
+};
+
+const THEME_KEY = "yadea-theme";
+const THEME_ORDER = ["auto", "dark", "light"];
+const THEME_ICON = { auto: "🌗", dark: "🌙", light: "☀️" };
+const THEME_LABEL = { auto: "跟随设备", dark: "深色", light: "浅色" };
+
+/** 当前主题偏好：URL ?theme= > localStorage > auto（跟随设备） */
+function themePref() {
+  try {
+    const q = new URLSearchParams(location.search).get("theme");
+    if (THEME_ORDER.includes(q)) return q;
+  } catch (err) {
+    /* ignore */
+  }
+  try {
+    const v = localStorage.getItem(THEME_KEY);
+    if (THEME_ORDER.includes(v)) return v;
+  } catch (err) {
+    /* ignore */
+  }
+  return "auto";
+}
+
+function resolvedTheme() {
+  const pref = themePref();
+  if (pref !== "auto") return pref;
+  try {
+    return matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light";
+  } catch (err) {
+    return "dark";
+  }
+}
+
+/** 把当前主题的变量写入 <style id="yadea-theme-vars">（幂等） */
+function applyTheme() {
+  let style = document.getElementById("yadea-theme-vars");
+  if (!style) {
+    style = document.createElement("style");
+    style.id = "yadea-theme-vars";
+    document.head.appendChild(style);
+  }
+  style.textContent = ":root{" + THEME_VARS[resolvedTheme()].join(";") + "}";
+  document.documentElement.setAttribute("data-ya-theme", resolvedTheme());
+}
+
+function cycleTheme() {
+  const next = THEME_ORDER[(THEME_ORDER.indexOf(themePref()) + 1) % THEME_ORDER.length];
+  try {
+    localStorage.setItem(THEME_KEY, next);
+  } catch (err) {
+    /* ignore */
+  }
+  applyTheme();
+  return next;
+}
+
+function ensureTheme() {
+  if (window.__yadeaThemeReady) return;
+  window.__yadeaThemeReady = true;
+  applyTheme();
+  try {
+    const mq = matchMedia("(prefers-color-scheme: dark)");
+    const onChange = () => {
+      if (themePref() === "auto") applyTheme();
+    };
+    if (mq.addEventListener) mq.addEventListener("change", onChange);
+    else if (mq.addListener) mq.addListener(onChange); // 旧版 Safari
+  } catch (err) {
+    /* ignore */
+  }
+}
+ensureTheme();
+
+/* 主题切换按钮（custom 卡）：点击在 跟随设备 → 深色 → 浅色 间循环 */
+class YadeaThemeToggle extends HTMLElement {
+  /* Lovelace 卡协议：hui-card 创建元素后会调用 setConfig */
+  setConfig(_config) {
+    /* no-op */
+  }
+  connectedCallback() {
+    if (this.__built) return;
+    this.__built = true;
+    const root = this.attachShadow({ mode: "open" });
+    const btn = document.createElement("button");
+    btn.type = "button";
+    btn.className = "t";
+    const render = () => {
+      const pref = themePref();
+      btn.textContent = THEME_ICON[pref] || "🌗";
+      btn.title = "主题：" + (THEME_LABEL[pref] || pref) + "（点击切换）";
+      btn.setAttribute("aria-label", btn.title);
+    };
+    btn.addEventListener("click", (ev) => {
+      ev.preventDefault();
+      ev.stopPropagation();
+      cycleTheme();
+      render();
+    });
+    const style = document.createElement("style");
+    style.textContent = [
+      ":host { display:block; text-align:right; line-height:0; }",
+      ".t { display:inline-flex; align-items:center; justify-content:center;",
+      "  width:38px; height:38px; border-radius:50%; margin:2px 6px 0 0;",
+      "  background: var(--ya-card-bg, #fff); border:1px solid var(--ya-card-border, transparent);",
+      "  box-shadow: var(--ya-card-shadow, none); cursor:pointer;",
+      "  font-size:17px; line-height:1; padding:0; outline:none; }",
+      ".t:hover { transform: scale(1.08); }",
+      ".t:active { transform: scale(0.95); }",
+    ].join("\n");
+    root.appendChild(style);
+    root.appendChild(btn);
+    render();
+  }
+  getCardSize() {
+    return 1;
+  }
+}
+if (!customElements.get("yadea-theme-toggle")) {
+  customElements.define("yadea-theme-toggle", YadeaThemeToggle);
+}
+function themeToggleCard() {
+  return { type: "custom:yadea-theme-toggle" };
+}
+
+const BG = "var(--ya-bg)";
 
 const CARD_CSS = [
   "ha-card {",
-  "  --primary-text-color: #f1f5f9;",
-  "  --secondary-text-color: #94a3b8;",
-  "  background: rgba(17,24,39,0.72) !important;",
-  "  border: 1px solid rgba(148,163,184,0.16) !important;",
+  "  --primary-text-color: var(--ya-text);",
+  "  --secondary-text-color: var(--ya-text2);",
+  "  background: var(--ya-card-bg) !important;",
+  "  border: 1px solid var(--ya-card-border) !important;",
   "  border-radius: 14px !important;",
-  "  box-shadow: 0 8px 24px rgba(2,6,23,0.45) !important;",
+  "  box-shadow: var(--ya-card-shadow) !important;",
   "}",
 ].join("\n");
 
 const MD_CSS = [
   "ha-card {",
-  "  background: rgba(17,24,39,0.72) !important;",
-  "  border: 1px solid rgba(148,163,184,0.16) !important;",
+  "  background: var(--ya-card-bg) !important;",
+  "  border: 1px solid var(--ya-card-border) !important;",
   "  border-radius: 14px !important;",
-  "  box-shadow: 0 8px 24px rgba(2,6,23,0.45) !important;",
-  "  color: #e2e8f0 !important;",
+  "  box-shadow: var(--ya-card-shadow) !important;",
+  "  color: var(--ya-heading) !important;",
   "}",
-  ".card-content { color: #e2e8f0 !important; }",
+  ".card-content { color: var(--ya-heading) !important; }",
   "table { width: 100%; border-collapse: collapse; font-size: 13px; }",
-  "th { color: #94a3b8; font-weight: 600; text-align: left; padding: 4px 6px;",
-  "     border-bottom: 1px solid rgba(148,163,184,0.22); }",
-  "td { padding: 5px 6px; border-bottom: 1px solid rgba(148,163,184,0.10); }",
+  "th { color: var(--ya-text2); font-weight: 600; text-align: left; padding: 4px 6px;",
+  "     border-bottom: 1px solid var(--ya-line-strong); }",
+  "td { padding: 5px 6px; border-bottom: 1px solid var(--ya-line); }",
 ].join("\n");
 
 /* 旗舰版同款渐变卡样式（总览页对齐旗舰版用） */
 const PRO_CARD_CSS = [
   "ha-card {",
-  "  --primary-text-color: #f1f5f9;",
-  "  --secondary-text-color: #94a3b8;",
-  "  --card-primary-color: #f1f5f9;",
-  "  --card-secondary-color: #94a3b8;",
-  "  --rgb-primary-text-color: 241,245,249;",
-  "  --rgb-secondary-text-color: 148,163,184;",
-  "  --markdown-table-border-color: rgba(148,163,184,0.22);",
-  "  --divider-color: rgba(148,163,184,0.16);",
-  "  --state-icon-color: #7dd3fc;",
-  "  background: linear-gradient(158deg, rgba(18,27,45,0.94) 0%, rgba(9,14,26,0.96) 100%) !important;",
-  "  border: 1px solid rgba(120,160,255,0.12);",
+  "  --primary-text-color: var(--ya-text);",
+  "  --secondary-text-color: var(--ya-text2);",
+  "  --card-primary-color: var(--ya-text);",
+  "  --card-secondary-color: var(--ya-text2);",
+  "  --rgb-primary-text-color: var(--ya-text-rgb);",
+  "  --rgb-secondary-text-color: var(--ya-text2-rgb);",
+  "  --markdown-table-border-color: var(--ya-line-strong);",
+  "  --divider-color: var(--ya-card-border);",
+  "  --state-icon-color: var(--ya-icon);",
+  "  background: var(--ya-pro-bg) !important;",
+  "  border: 1px solid var(--ya-pro-border);",
   "  border-radius: 20px;",
-  "  box-shadow: 0 12px 30px rgba(2,6,23,0.40);",
+  "  box-shadow: var(--ya-pro-shadow);",
   "  overflow: hidden;",
   "}",
+  /* apexcharts 的 foreColor 是 SVG 属性，无法用 JS 配置跟随主题，这里用 CSS 覆盖 */
+  ".apexcharts-text { fill: var(--ya-chart-text) !important; color: var(--ya-chart-text) !important; }",
+  ".apexcharts-gridline, .apexcharts-xaxis-tick { stroke: var(--ya-chart-grid) !important; }",
 ].join("\n");
 
 const PRO_MD_CSS = [PRO_CARD_CSS, "ha-markdown { padding: 12px 16px; font-size: 90%; }"].join(
@@ -93,8 +274,8 @@ function headingCard(text, icon, accent) {
     card_mod: {
       style: [
         "ha-card {",
-        "  --ha-heading-card-title-color: #e2e8f0;",
-        "  --ha-heading-card-subtitle-color: #94a3b8;",
+        "  --ha-heading-card-title-color: var(--ya-heading);",
+        "  --ha-heading-card-subtitle-color: var(--ya-text2);",
         "  --ha-heading-card-title-font-weight: 600;",
         "  --ha-heading-card-subtitle-font-weight: 600;",
         "  background: transparent !important;",
@@ -247,23 +428,23 @@ function heroCard(hass, v) {
   ].join("");
 
   const bgLayers = [
-    "linear-gradient(0deg, rgba(8,13,24,0.85) 0%, rgba(8,13,24,0) 30%)",
-    "linear-gradient(90deg, rgba(8,13,24,0.99) 0%, rgba(8,13,24,0.95) 28%, rgba(8,13,24,0.30) 50%, rgba(8,13,24,0) 68%)",
+    "var(--ya-hero-tint1)",
+    "var(--ya-hero-tint2)",
     img ? `url("${img}") right 2px center / contain no-repeat` : null,
-    "linear-gradient(160deg, #16233c 0%, #0a1020 100%)",
+    "var(--ya-hero-base)",
   ]
     .filter(Boolean)
     .join(", ");
 
   const styleDot = [
     "ha-card {",
-    "  --primary-text-color: #f1f5f9;",
-    "  --secondary-text-color: #94a3b8;",
+    "  --primary-text-color: var(--ya-text);",
+    "  --secondary-text-color: var(--ya-text2);",
     "  min-height: 168px;",
     "  border-radius: 24px;",
     "  overflow: hidden;",
-    "  border: 1px solid rgba(120,160,255,0.14);",
-    "  box-shadow: 0 16px 36px rgba(2,6,23,0.50);",
+    "  border: 1px solid var(--ya-hero-border);",
+    "  box-shadow: var(--ya-hero-shadow);",
     `  background: ${bgLayers};`,
     "}",
     "ha-markdown { padding: 14px 16px; }",
@@ -424,17 +605,17 @@ async function detectBarCard(timeoutMs = 1500) {
 
 const BAR_CARD_CSS = [
   "ha-card {",
-  "  background: linear-gradient(158deg, rgba(18,27,45,0.94) 0%, rgba(9,14,26,0.96) 100%) !important;",
-  "  border: 1px solid rgba(120,160,255,0.12);",
+  "  background: var(--ya-pro-bg) !important;",
+  "  border: 1px solid var(--ya-pro-border);",
   "  border-radius: 18px;",
-  "  box-shadow: 0 12px 30px rgba(2,6,23,0.40);",
+  "  box-shadow: var(--ya-pro-shadow);",
   "  padding: 10px 14px 6px;",
-  "  --primary-text-color: #94a3b8;",
+  "  --primary-text-color: var(--ya-text2);",
   "}",
   "bar-card-currentbar, bar-card-backgroundbar { border-radius: 7px; }",
   "bar-card-name { font-size: 12px; }",
-  "bar-card-value { font-size: 12px; color: #e2e8f0; }",
-  "bar-card-iconbar ha-icon { color: #7dd3fc; }",
+  "bar-card-value { font-size: 12px; color: var(--ya-heading); }",
+  "bar-card-iconbar ha-icon { color: var(--ya-icon); }",
 ].join("\n");
 
 function batteryBarCard(hass, v) {
@@ -900,13 +1081,13 @@ function lastLocationMap(hass, v) {
         default_zoom: 15,
         aspect_ratio: "16:9",
         card_mod: {
-          style: `ha-card { border: 1px solid rgba(148,163,184,0.18); border-radius: 16px; overflow: hidden; }`,
+          style: `ha-card { border: 1px solid var(--ya-card-border); border-radius: 16px; overflow: hidden; }`,
         },
       },
       attrs.address
         ? {
             type: "markdown",
-            content: `<font style="font-size:12px;color:#94a3b8">📍 ${esc(attrs.address)}${time ? ` · ${time} 上报` : ""}</font>`,
+            content: `<font style="font-size:12px;color:var(--ya-text2)">📍 ${esc(attrs.address)}${time ? ` · ${time} 上报` : ""}</font>`,
             card_mod: {
               style: `ha-card { background: transparent; border: none; box-shadow: none; padding: 4px 8px; margin-top: -12px; }`,
             },
@@ -932,6 +1113,7 @@ function overviewView(vehicles, hass, hasBar, trends) {
       lastLocationMap(hass, v),
     ].filter(Boolean),
   }));
+  sections[0].cards.unshift(themeToggleCard());
 
   // 旗舰版共享区块（双车对比 / 车辆档案 / 能耗 / 物联卡 / 数据说明）
   const units = [
@@ -969,7 +1151,7 @@ function overviewView(vehicles, hass, hasBar, trends) {
 }
 
 function trackView(vehicles, hass) {
-  return {
+  const sec = {
     title: "骑行轨迹",
     path: "track",
     icon: "mdi:map-marker-path",
@@ -990,10 +1172,12 @@ function trackView(vehicles, hass) {
       ].filter(Boolean),
     })),
   };
+  if (sec.sections[0]) sec.sections[0].cards.unshift(themeToggleCard());
+  return sec;
 }
 
 function dataView(vehicles, hass) {
-  return {
+  const dv = {
     title: "能耗档案",
     path: "data",
     icon: "mdi:chart-areaspline",
@@ -1010,6 +1194,8 @@ function dataView(vehicles, hass) {
       ].filter(Boolean),
     })),
   };
+  if (dv.sections[0]) dv.sections[0].cards.unshift(themeToggleCard());
+  return dv;
 }
 
 /* ---------------------------------------------------------------- 策略本体 */
@@ -1084,7 +1270,7 @@ try {
       strategyType: "dashboard",
       name: "雅迪电动车",
       description:
-        "自动发现雅迪车辆，生成总览 / 骑行轨迹 / 能耗档案三套深色视图。依赖 card-mod、mushroom、apexcharts-card；可选 bar-card 提供电量长条图。",
+        "自动发现雅迪车辆，生成总览 / 骑行轨迹 / 能耗档案三套视图；深浅双主题，默认跟随设备外观，页面右上角按钮可切换（?theme=dark/light/auto 可强制）。依赖 card-mod、mushroom、apexcharts-card；可选 bar-card 提供电量长条图。",
       documentationURL: "https://github.com/flyqgs/yadea-dashboard",
     });
   }
