@@ -74,12 +74,14 @@ strategy:
 frontend:
   themes: !include_dir_merge_named themes
   extra_module_url:
-    - /local/hass_map_cn.js?v=20261109h    # 版本号随脚本更新递增
+    - /local/hass_map_cn.js?v=20261110b    # 版本号随脚本更新递增
 ```
 
 3. 刷新浏览器（Ctrl+F5）。控制台出现 `HASS-MAP-CN v2` 即生效
 
 > 该脚本作用于**全局原生地图**（地图面板、其它地图卡同样受益）。更新脚本后**必须更换 `?v=` 版本号**——HA 对 `/local/` 静态文件缓存 31 天，同 URL 不会重新拉取。
+>
+> **自带黑屏自愈**：maplibre 对加载失败的瓦片不会重试，网络抖动或锁屏后 WebGL 被回收会导致地图永久空白。脚本会巡检每张地图，发现"从未成功加载瓦片"或"引擎异常"时自动重拉瓦片/重建引擎（带限流，最多 5 次），无需手动刷新页面。
 
 ### 可选配置（脚本顶部常量）
 
