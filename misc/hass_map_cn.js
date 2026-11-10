@@ -112,17 +112,64 @@ window.fetch = (input, init) => {
   return originalFetch.call(window, input, init);
 };
 
-/* ========== GCJ-02 坐标纠偏：hook ha-map 的 _states（实体坐标入口） ========== */
+/* ========== GCJ-02 坐标纠偏 + 车辆图片标记：hook ha-map 的 _states（实体坐标入口） ========== */
 /* 只影响 ha-map（原生地图卡 + 地图面板），其他卡片拿到的是原始状态 */
 const convCache = new Map();
+/* 车辆图片：device_tracker.<x>_last_location → 同车 image 实体的 entity_picture。
+   匹配策略：1) entity_id 前缀直接命中；2) 未命中时经实体注册表按 device_id 关联
+   （tracker 与 image 命名可能不一致，如 qin_jia_dian_dong_che ↔ long_ting_70_y_g）。
+   HA 原生 marker 在实体带 entity_picture 时会自动用图片替代文字气泡 */
+const deviceImageMap = new Map(); // device_tracker entity_id → picture url
+let deviceMapPromise = null;
+function syncPicture(entityId) {
+  const m = /^device_tracker\.(.+)_last_location$/.exec(entityId || "");
+  if (!m) return null;
+  try {
+    const ha = document.querySelector("home-assistant");
+    const img = ha && ha.hass && ha.hass.states && ha.hass.states["image." + m[1]];
+    return (img && img.attributes && img.attributes.entity_picture) || null;
+  } catch (e) { return null; }
+}
+function buildDeviceImageMap() {
+  const ha = document.querySelector("home-assistant");
+  if (!ha || !ha.hass || !ha.hass.connection) return Promise.resolve();
+  return ha.hass.connection
+    .sendMessagePromise({ type: "config/entity_registry/list" })
+    .then((regs) => {
+      const imgByDevice = new Map(); // device_id → entity_id
+      for (const ent of regs) {
+        if (ent.entity_id && ent.entity_id.startsWith("image.") && ent.device_id) {
+          imgByDevice.set(ent.device_id, ent.entity_id);
+        }
+      }
+      for (const ent of regs) {
+        if (ent.entity_id && /^device_tracker\..+_last_location$/.test(ent.entity_id) && ent.device_id) {
+          const imgEid = imgByDevice.get(ent.device_id);
+          const st = imgEid && ha.hass.states[imgEid];
+          const pic = st && st.attributes && st.attributes.entity_picture;
+          if (pic) deviceImageMap.set(ent.entity_id, pic);
+        }
+      }
+    })
+    .catch(() => { deviceMapPromise = null; });
+}
+function vehiclePicture(entityId) {
+  const direct = syncPicture(entityId);
+  if (direct) return direct;
+  if (!deviceMapPromise) deviceMapPromise = buildDeviceImageMap();
+  return deviceImageMap.get(entityId) || null;
+}
 function convEntity(state) {
   const a = state.attributes;
   if (!a || typeof a.latitude !== "number" || typeof a.longitude !== "number") return state;
-  const key = a.latitude.toFixed(6) + "," + a.longitude.toFixed(6);
+  const pic = vehiclePicture(state.entity_id);
+  const key = a.latitude.toFixed(6) + "," + a.longitude.toFixed(6) + "|" + (pic || "");
   let fixed = convCache.get(key);
   if (!fixed) {
     const [gLat, gLng] = wgs2gcj(a.latitude, a.longitude);
-    fixed = { ...state, attributes: { ...a, latitude: gLat, longitude: gLng } };
+    const attrs = { ...a, latitude: gLat, longitude: gLng };
+    if (pic && !attrs.entity_picture) attrs.entity_picture = pic;
+    fixed = { ...state, attributes: attrs };
     convCache.set(key, fixed);
     if (convCache.size > 500) convCache.clear();
   }
@@ -155,9 +202,22 @@ function patchHaMapCoords() {
 const patchTimer = setInterval(() => { if (patchHaMapCoords()) clearInterval(patchTimer); }, 300);
 setTimeout(() => clearInterval(patchTimer), 120000);
 
-/* ========== 暗色主题底图反色 + 标记字号 ========== */
+/* ========== 暗色主题底图反色 + 标记字号 + 车辆图片标记 ========== */
 const MARKER_FONT_SIZE = "10px";
 const MARKER_CSS = `ha-entity-marker::part(marker) { font-size: ${MARKER_FONT_SIZE} !important; }`;
+const VEHICLE_MARKER_CSS = `
+.marker.has-vehicle-img {
+  background: transparent !important;
+  padding: 0 !important;
+  width: 42px !important;
+  height: 42px !important;
+  border-radius: 50% !important;
+  overflow: hidden;
+  border: 2px solid rgba(255, 255, 255, .92);
+  box-shadow: 0 1px 6px rgba(0, 0, 0, .45);
+}
+.marker.has-vehicle-img img { width: 100% !important; height: 100% !important; object-fit: cover; display: block; }
+`;
 const DARK_CSS = `.maplibregl-canvas { filter: invert(0.92) hue-rotate(180deg) saturate(0.55) brightness(0.95) contrast(0.92); }`;
 
 function isDarkTheme() {
@@ -199,6 +259,37 @@ function eachShadowRoot(root, fn) {
     if (el.shadowRoot) { fn(el.shadowRoot); eachShadowRoot(el.shadowRoot, fn); }
   });
 }
+/* 车辆标记换车辆图片：ha-entity-marker(.marker 文字) → 同设备 image.* 的实拍图 */
+function injectVehicleMarkers() {
+  eachShadowRoot(document, (sr) => {
+    const host = sr.host;
+    // 1) ha-entity-marker 自身 shadowRoot：替换文字为图片
+    if (host && host.tagName === "HA-ENTITY-MARKER") {
+      const markerDiv = sr.querySelector(".marker");
+      if (markerDiv && !markerDiv.querySelector("img.vehicle-img")) {
+        const eid = host.getAttribute("entity-id") || host.entityId || "";
+        const pic = vehiclePicture(eid);
+        if (pic && markerDiv.textContent.trim()) {
+          markerDiv.textContent = "";
+          const img = document.createElement("img");
+          img.className = "vehicle-img";
+          img.src = pic;
+          img.alt = "";
+          markerDiv.appendChild(img);
+          markerDiv.classList.add("has-vehicle-img");
+        }
+      }
+    }
+    // 2) 包含 ha-entity-marker 的 shadowRoot：注入样式
+    if ((sr.querySelector("ha-entity-marker") || (host && host.tagName === "HA-ENTITY-MARKER"))
+        && !sr.querySelector("style.hass-map-cn-vehicle")) {
+      const st = document.createElement("style");
+      st.className = "hass-map-cn-vehicle";
+      st.textContent = VEHICLE_MARKER_CSS;
+      sr.appendChild(st);
+    }
+  });
+}
 function injectMapStyles() {
   eachShadowRoot(document, (sr) => {
     const mapEl = sr.querySelector("ha-map") || (sr.host && sr.host.tagName === "HA-MAP" ? sr.host : null);
@@ -224,9 +315,10 @@ function injectMapStyles() {
     }
   });
 }
-new MutationObserver(() => injectMapStyles()).observe(document.body, { childList: true, subtree: true });
-setInterval(injectMapStyles, 3000);
+new MutationObserver(() => { injectMapStyles(); injectVehicleMarkers(); }).observe(document.body, { childList: true, subtree: true });
+setInterval(() => { injectMapStyles(); injectVehicleMarkers(); }, 3000);
 injectMapStyles();
+injectVehicleMarkers();
 
 console.info(
   "%c HASS-MAP-CN v2 %c 底图：" + (TDT_KEY ? "天地图(官方无偏移)" : "高德地图 + GCJ02纠偏(" + AMAP_STYLE + ")") + " ",
