@@ -13,7 +13,7 @@
  * 生成后可在仪表盘右上角「接管控制」转为可手动编辑的普通仪表盘。
  */
 
-const VERSION = "1.2.8";
+const VERSION = "1.2.9";
 const ACCENTS = ["#fbbf24", "#38bdf8", "#a78bfa", "#34d399", "#f472b6", "#facc15"];
 
 /* ---------------------------------------------------------------- 主题系统 */
@@ -521,13 +521,23 @@ function statGrid(hass, v) {
   return { type: "grid", columns: 2, square: false, cards: items };
 }
 
-/** 旗舰版同款近 7 天柱状图（读 this_week_mileage 的 days 属性） */
+/** 旗舰版同款近 7 天柱状图（里程柱 + 耗电百分比折线，双 y 轴） */
 function weeklyChart(hass, v) {
-  // 优先用「近7天逐日里程」传感器（days 属性含最近 31 天逐日记录）；
+  // 里程：优先用「近7天逐日里程」传感器（days 属性含最近 31 天逐日记录）；
   // 退而求其次用本周里程（仅当周，周一当天只有 1 条）。
   const dayId = eid(v, "daily_mileage_7_day");
   const id = hasEntity(hass, dayId) ? dayId : eid(v, "this_week_mileage");
   if (!hasEntity(hass, id)) return null;
+  // 耗电：近 7 天用电实体（v2.2.0+ 的 days 属性含逐日 {date, consume}，单位为电池百分比 %）。
+  // 旧版集成 days 无 consume 值时曲线自动为空，不影响里程柱。
+  const consumeId = eid(v, "7_day_consumption");
+  const hasConsume = hasEntity(hass, consumeId);
+  const dateSeries = [
+    "const rows = (entity && entity.attributes && entity.attributes.days) || [];",
+    "const cn = new Date(Date.now() + 8 * 3600 * 1000);",
+    "const cutoff = new Date(cn.getTime() - 6 * 86400000).toISOString().slice(0, 10);",
+    "const pick = (r, k) => (r[k] == null ? null : Number(r[k]) || 0);",
+  ];
   return {
     type: "custom:apexcharts-card",
     header: { show: false },
@@ -539,17 +549,32 @@ function weeklyChart(hass, v) {
       {
         entity: id,
         type: "column",
-        name: "每日里程",
+        name: "里程 km",
         color: v.accent,
         data_generator: [
-          "const rows = (entity && entity.attributes && entity.attributes.days) || [];",
-          "const cn = new Date(Date.now() + 8 * 3600 * 1000);",
-          "const cutoff = new Date(cn.getTime() - 6 * 86400000).toISOString().slice(0, 10);",
+          ...dateSeries,
           "return rows.filter((r) => r.date >= cutoff)",
           "  .sort((a, b) => (a.date < b.date ? -1 : 1))",
-          "  .map((r) => [new Date(r.date + 'T00:00:00+08:00').getTime(), Number(r.km) || 0]);",
+          "  .map((r) => [new Date(r.date + 'T00:00:00+08:00').getTime(), pick(r, 'km')]);",
         ].join("\n"),
       },
+      ...(hasConsume
+        ? [
+            {
+              entity: consumeId,
+              type: "line",
+              name: "耗电 %",
+              color: "#a78bfa",
+              stroke_width: 2,
+              data_generator: [
+                ...dateSeries,
+                "return rows.filter((r) => r.date >= cutoff && r.consume != null)",
+                "  .sort((a, b) => (a.date < b.date ? -1 : 1))",
+                "  .map((r) => [new Date(r.date + 'T00:00:00+08:00').getTime(), Number(r.consume)]);",
+              ].join("\n"),
+            },
+          ]
+        : []),
     ],
     apex_config: {
       chart: { height: 150, foreColor: "#94a3b8", toolbar: { show: false } },
@@ -559,13 +584,29 @@ function weeklyChart(hass, v) {
         axisBorder: { show: false },
         axisTicks: { show: false },
       },
-      yaxis: { labels: { style: { fontSize: "10px" } } },
+      // 双 y 轴：左轴里程（柱），右轴耗电百分比（线）
+      yaxis: [
+        { labels: { style: { fontSize: "10px" } }, min: 0 },
+        {
+          opposite: true,
+          min: 0,
+          max: (max) => Math.max(100, Math.ceil((max || 0) / 10) * 10),
+          labels: { style: { fontSize: "10px" }, showAlways: false },
+          show: hasConsume,
+        },
+      ],
       grid: {
         borderColor: "rgba(148,163,184,0.14)",
         yaxis: { lines: { show: true } },
       },
       plotOptions: { bar: { borderRadius: 4, columnWidth: "55%" } },
-      tooltip: { theme: "dark" },
+      tooltip: { shared: { enabled: true, sortAsc: false } },
+      legend: {
+        show: hasConsume,
+        fontSize: "11px",
+        markers: { width: 6, height: 6 },
+        itemMargin: { horizontal: 6 },
+      },
       noData: {
         text: "暂无骑行数据 · 骑行后自动累计",
         align: "center",
@@ -894,7 +935,7 @@ function energyGrid(hass, v) {
       tplCard({
         icon,
         color,
-        primary: `{{ states('${id}') }} kWh`,
+        primary: `{{ states('${id}') }} %`,
         secondary: label,
       })
     );
@@ -996,8 +1037,8 @@ function energyUnit(vehicles, hass) {
         primary: `${v.model || v.name} · 能耗`,
         multiline: true,
         secondary: [
-          `昨充 ${valTpl(eid(v, "yesterday_charge"))} kWh · 昨用 ${valTpl(eid(v, "yesterday_consumption"))} kWh · `,
-          `7天充 ${valTpl(eid(v, "7_day_charge"))} kWh · 7天用 ${valTpl(eid(v, "7_day_consumption"))} kWh`,
+          `昨充 ${valTpl(eid(v, "yesterday_charge"))} % · 昨用 ${valTpl(eid(v, "yesterday_consumption"))} % · `,
+          `7天充 ${valTpl(eid(v, "7_day_charge"))} % · 7天用 ${valTpl(eid(v, "7_day_consumption"))} %`,
         ].join(""),
         style: PRO_CARD_CSS,
       })
